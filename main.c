@@ -16,6 +16,9 @@
 #define MAX_FLIGHT_ID_SIZE 7
 #define MAX_AMOUNT_FLIGHTS 30001
 
+#define TIME_SIZE 6
+#define DATE_SIZE 11
+
 /*------------------Class definitions & Global variables------------------*/
 
 typedef struct date {
@@ -24,7 +27,8 @@ typedef struct date {
     int year;
 } Date;
 
-int monthsToDays[13] = {0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334};
+int monthsToDays[12] = {0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334};
+int daysInAMonth[12] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
 
 Date currentDate = {1, 1, 2022};
 
@@ -39,6 +43,8 @@ typedef struct flight {
     char arrivalAirport[AIRPORT_ID_SIZE];
     Date departureDate;
     Time departureTime;
+    Date arrivalDate;
+    Time arrivalTime;
     Time duration;
     int maxPassengers;
 } Flight;
@@ -62,21 +68,9 @@ int airportIterator = 0;
 
 /*--------------------------Auxiliary functions--------------------------*/
 
-int split(char* line, char* string[]) {
-    int i = 0;
-    char* cmd = strtok(line," \t\n");
-    cmd = strtok(NULL, " \t\n");
-    while (cmd != NULL) {
-        string[i] = malloc(sizeof(cmd)+1);
-        strcpy(string[i++], cmd);
-        cmd = strtok(NULL, " \t\n");
-    } 
-    return i;
-}
-
 int compareDateAndTime(Date date1, Time time1, Date date2, Time time2) {
-    int timestamp1 = date1.year*31536000 + monthsToDays[date1.month-1]*86400 + date1.day*86400 + time1.hour*3600 + time1.minute;
-    int timestamp2 = date2.year*31536000 + monthsToDays[date2.month-1]*86400 + date2.day*86400 + time2.hour*3600 + time2.minute;
+    int timestamp1 = date1.year*525600 + monthsToDays[date1.month-1]*1440 + date1.day*1440 + time1.hour*60 + time1.minute;
+    int timestamp2 = date2.year*525600 + monthsToDays[date2.month-1]*1440 + date2.day*1440 + time2.hour*60 + time2.minute;
 
     return timestamp1-timestamp2;
 }
@@ -89,7 +83,7 @@ int invalidDateCheck(Date currentDate, Date date) {
     return (dayDiff < 0) || (dayDiff > 365);
 }
 
-void dateToString(Date date, char* toStringDate) {
+void dateToString(Date date, char toStringDate[]) {
     char sday[3], smonth[3];
 
     if(date.day < 10) {
@@ -107,7 +101,7 @@ void dateToString(Date date, char* toStringDate) {
     sprintf(toStringDate, "%s-%s-%d", sday, smonth, date.year);
 }
 
-void timeToString(Time time, char* toStringTime) {
+void timeToString(Time time, char toStringTime[]) {
     char shour[3], sminute[3];
 
     if(time.hour < 10) {
@@ -125,6 +119,34 @@ void timeToString(Time time, char* toStringTime) {
     sprintf(toStringTime, "%s:%s", shour, sminute);
 }
 
+void addTime(Flight flight, Date *newDate, Time *newTime) {
+    Date initDate = flight.departureDate;
+    Time initTime = flight.departureTime, duration = flight.duration;
+    int carryInH = 0, carryInD = 0, carryInM = 0, carryInY = 0;
+
+    newTime->minute = initTime.minute + duration.minute;
+    while(newTime->minute >= 60) {
+        newTime->minute -= 60;
+        carryInH++;
+    }
+    newTime->hour = initTime.hour + duration.hour + carryInH;
+    while(newTime->hour >= 24) {
+        newTime->hour -= 24;
+        carryInD++;
+    }
+    newDate->day = initDate.day + carryInD;
+    while(newDate->day > daysInAMonth[initDate.month+carryInM-1]) {
+        newDate->day -= daysInAMonth[initDate.month+carryInM-1];
+        carryInM++;
+        if(initDate.month+carryInM > 12) {
+            initDate.month = 0;
+            carryInY++;
+        }
+    }
+    newDate->month = initDate.month + carryInM;
+    newDate->year = initDate.year + carryInY;
+}
+
 void sortAndPrintAirports() {
     int k, ptr, i;
     Airport key;
@@ -140,40 +162,60 @@ void sortAndPrintAirports() {
     }
 
     for(i = 0; i < airportIterator; i++){
-        printf("%s %s %s %d\n", airports[i].id, airports[i].city, airports[i].country, airports[i].nVoos);
+        printf("%s %s %s %d\r\n", airports[i].id, airports[i].city, airports[i].country, airports[i].nVoos);
     }
 }
 
-void sortAndPrintFlights(Flight flightList[], int size) {
-    char *sDate = (char *)malloc(11), *sTIme = (char *)malloc(6);
+void sortAndPrintFlights(Flight flightList[], int size, int isArrival) {
+    char sDate[DATE_SIZE], sTime[TIME_SIZE], tempID[AIRPORT_ID_SIZE];
     int k, ptr, i;
     Flight key;
+    Time newTime;
+    Date newDate;
 
     for(k = 1; k < size; k++) {
         key = flightList[k];
         ptr = k-1;
-        while(ptr >=0 && compareDateAndTime(flightList[ptr].departureDate, flightList[ptr].departureTime, key.departureDate, key.departureTime)>0) {
-            flightList[ptr+1] = flightList[ptr];
-            ptr--;
+        if(isArrival) {
+            while(ptr >=0 && compareDateAndTime(flightList[ptr].arrivalDate, flightList[ptr].arrivalTime, key.arrivalDate, key.arrivalTime)>0) {
+                flightList[ptr+1] = flightList[ptr];
+                ptr--;
+            }
+        } else {
+            while(ptr >=0 && compareDateAndTime(flightList[ptr].departureDate, flightList[ptr].departureTime, key.departureDate, key.departureTime)>0) {
+                flightList[ptr+1] = flightList[ptr];
+                ptr--;
+            }
         }
         flightList[ptr+1] = key;
     }
 
     for(i = 0; i < size; i++){
-        dateToString(flightList[i].departureDate, sDate);
-        timeToString(flightList[i].departureTime, sTIme);
-        printf("%s %s %s %s %s\n", flightList[i].id, flightList[i].departureAirport, flightList[i].arrivalAirport, sDate, sTIme);
+        if(isArrival) {
+            strcpy(tempID, flightList[i].departureAirport);
+            newDate = flightList[i].arrivalDate;
+            newTime = flightList[i].arrivalTime;
+        } else {
+            strcpy(tempID, flightList[i].arrivalAirport);
+            newDate = flightList[i].departureDate;
+            newTime = flightList[i].departureTime;
+        }
+
+        dateToString(newDate, sDate);
+        timeToString(newTime, sTime);
+        
+        printf("%s %s %s %s\r\n", flightList[i].id, tempID, sDate, sTime);
     }
 }
 
 void printFlights() {
-    char *sDate = (char *)malloc(11), *sTIme = (char *)malloc(6);
+    char sDate[DATE_SIZE], sTime[TIME_SIZE];
     int i;
 
     for(i = 0; i < flightIterator; i++){
         dateToString(flights[i].departureDate, sDate);
-        timeToString(flights[i].departureTime, sTIme);
-        printf("%s %s %s %s %s\n", flights[i].id, flights[i].departureAirport, flights[i].arrivalAirport, sDate, sTIme);
+        timeToString(flights[i].departureTime, sTime);
+        printf("%s %s %s %s %s\r\n", flights[i].id, flights[i].departureAirport, flights[i].arrivalAirport, sDate, sTime);
     }
 }
 
@@ -182,41 +224,36 @@ void printFlights() {
 
 void addAirport() {
     Airport newAirport;
-    int idSize, i;
+    int i;
     char stringArray[MAX_AMOUNT_AIRPORTS][MAX_AIRPORT_CITY_SIZE], ch;
 
     scanf("%s", stringArray[0]);
     scanf("%s", stringArray[1]);
     getchar();
-    scanf("%[^\n]%*c", stringArray[2]);
+    scanf("%[^\r\n]%*c", stringArray[2]);
 
     /* invalid airport ID check */
-    idSize = strlen(stringArray[0]);
     ch = stringArray[0][0];
     i = 0;
-    if(idSize != 3) {
-        printf("invalid airport ID\n");
-        return;
-    } else {
-        while (ch != '\0') {
-            if(!isupper(ch)) {
-                printf("invalid airport ID\n");
-                return;
-            }
-            ch = stringArray[0][i++];
+    while (ch != '\0') {
+        if(!isupper(ch)) {
+            printf("invalid airport ID\r\n");
+            return;
         }
+        ch = stringArray[0][i++];
     }
 
+
     /* too many airports check */
-    if(airportIterator > 40 ) {
-        printf("too many airports\n");
+    if(airportIterator >= 40 ) {
+        printf("too many airports\r\n");
         return;
     }
 
     /* duplicate airport check */
     for(i = 0; i < airportIterator; i++) {
         if(strcmp(stringArray[0], airports[i].id) == 0) {
-            printf("duplicate airport\n");
+            printf("duplicate airport\r\n");
             return;
         }
     }
@@ -225,70 +262,68 @@ void addAirport() {
     strcpy(newAirport.id, stringArray[0]);
     strcpy(newAirport.country, stringArray[1]);
     strcpy(newAirport.city, stringArray[2]);
+    
     newAirport.nVoos = 0;
     newAirport.arrivedIterator = 0;
     newAirport.departedIterator = 0;
     airports[airportIterator] = newAirport; 
 
-    printf("airport %s\n", airports[airportIterator++].id);
+    printf("airport %s\r\n", airports[airportIterator++].id);
 }
 
 void listAirports() {
     char airportID[AIRPORT_ID_SIZE], x, ch = ' ';
     int i, flag;
-
-    if((x = getchar()) == '\n' || x == EOF) {
-        sortAndPrintAirports();
-    } else { 
-        while(ch != '\n' && ch != EOF) {
+    if((x = getchar()) == ' ') {
+        while(ch == ' ' && ch != EOF) {
             scanf("%s", airportID);
             /* no such airport ID flag */
             flag = 1;
             for(i = 0; i < airportIterator; i++) {
                 if(strcmp(airportID, airports[i].id) == 0) {
-                    printf("%s %s %s %d\n", airports[i].id, airports[i].city, airports[i].country, airports[i].nVoos);
+                    printf("%s %s %s %d\r\n", airports[i].id, airports[i].city, airports[i].country, airports[i].nVoos);
                     flag = 0;
                     break;
                 }
             }
             if(flag) {
-                printf("%s: no such airport ID\n", airportID);
+                printf("%s: no such airport ID\r\n", airportID);
             }
             ch = getchar();
         }
+    } else { 
+        sortAndPrintAirports();
     }
 }
 
 void addFlight() {
     Flight newFlight;
     char flightID[MAX_FLIGHT_ID_SIZE], arAirportID[AIRPORT_ID_SIZE], deAirportID[AIRPORT_ID_SIZE];
-    char *sDate = (char *)malloc(11), *sTIme = (char *)malloc(6), x;
-    Date departureDate;
-    Time departureTime, duration;
+    char sDate[DATE_SIZE], sTime[TIME_SIZE], x;
+    Date departureDate, *arrivalDate = malloc(sizeof(Date));
+    Time departureTime, duration, *arrivalTime = malloc(sizeof(Time)), temp = {0,0};
     int capacity, i, idLen, flag1, flag2;
 
-    if((x = getchar()) == '\n' || x == EOF) {
-        printFlights();
-    } else {
+    if((x = getchar()) == ' ') {
         scanf("%s %s %s %d-%d-%d %d:%d %d:%d %d", flightID, deAirportID, arAirportID, 
             &departureDate.day, &departureDate.month, &departureDate.year, &departureTime.hour, 
             &departureTime.minute, &duration.hour, &duration.minute, &capacity);
 
         dateToString(departureDate, sDate);
-        timeToString(departureTime, sTIme);
+        timeToString(departureTime, sTime);
 
         /* invalid flight code check */
         idLen = strlen(flightID);
         if(idLen > 6 || idLen < 3) {
-            printf("invalid flight code\n");
+            printf("invalid flight code\r\n");
             return;
         } else {
             for(i = 0; i < idLen; i++) {
-                if(i < 2 && !isupper(flightID[i])) {
-                    printf("invalid flight code\n");
+                if(i < 2 && !isupper((int)flightID[i])) {
+                    printf("invalid flight code\r\n");
                     return;
-                } else if(i >= 2 && !isdigit(flightID[i])) {
-                    printf("invalid flight code\n");
+                } else if(i >= 2 && (!isdigit((int)flightID[i]) || (flightID[i] == '0' && i == 2)) ) {
+                    printf("invalid flight code\r\n");
                     return;
                 }
             }
@@ -296,9 +331,9 @@ void addFlight() {
 
         /* flight already exists check */
         for(i = 0; i < flightIterator; i++) {
-            if(strcmp(flightID, flights[i].id) == 0 && departureDate.day == flights[i].departureDate.day && 
-            departureDate.month == flights[i].departureDate.month && departureDate.year == flights[i].departureDate.year) {
-                printf("flight already exists\n");
+            if(strcmp(flightID, flights[i].id) == 0 && compareDateAndTime(departureDate, temp, 
+            flights[i].departureDate, temp) == 0) {
+                printf("flight already exists\r\n");
                 return;
             }
         }
@@ -307,34 +342,37 @@ void addFlight() {
         flag1 = 1; 
         flag2 = 1;
         for(i = 0; i < airportIterator; i++) {
-            if(strcmp(deAirportID, airports[i].id) == 0) flag1 = 0;
+            if(strcmp(deAirportID, airports[i].id) == 0) {
+                flag1 = 0;
+                airports[i].nVoos++;
+            }
             if(strcmp(arAirportID, airports[i].id) == 0) flag2 = 0;
         }
-        if(flag1) printf("%s: no such airport ID\n", deAirportID);
-        if(flag2) printf("%s: no such airport ID\n", arAirportID);
+        if(flag1) printf("%s: no such airport ID\r\n", deAirportID);
+        if(flag2) printf("%s: no such airport ID\r\n", arAirportID);
         if(flag1 || flag2) return;
 
         /* too many flights check */
-        if(flightIterator > 40) {
-            printf("too many flights\n");
+        if(flightIterator > 30000) {
+            printf("too many flights\r\n");
             return;
         }
 
         /* invalid date check */
         if(invalidDateCheck(currentDate, departureDate)) {
-            printf("invalid date\n");
+            printf("invalid date\r\n");
             return;
         } 
 
         /* invalid duration check */
         if(duration.hour*60 + duration.minute > 12*60) {
-            printf("invalid duration\n");
+            printf("invalid duration\r\n");
             return;
         }
 
         /* invalid capacity check */
         if(10 > capacity || capacity > 100) {
-            printf("invalid capacity\n");
+            printf("invalid capacity\r\n");
             return;
         }
 
@@ -346,17 +384,22 @@ void addFlight() {
         newFlight.duration = duration;
         newFlight.maxPassengers = capacity;
 
+        addTime(newFlight, arrivalDate, arrivalTime);
+        newFlight.arrivalDate = *arrivalDate;
+        newFlight.arrivalTime = *arrivalTime;
+
         for(i = 0; i < airportIterator; i++) {
             if(strcmp(newFlight.departureAirport, airports[i].id) == 0) {
                 airports[i].departedFlights[airports[i].departedIterator++] = flightIterator;
-            } else if (strcmp(newFlight.arrivalAirport, airports[i].id) == 0) {
+            } 
+            if (strcmp(newFlight.arrivalAirport, airports[i].id) == 0) {
                 airports[i].arrivedFlights[airports[i].arrivedIterator++] = flightIterator;
             }
         }
 
         flights[flightIterator++] = newFlight;
-
-        printf("%s %s %s %s %s\n", newFlight.id, newFlight.departureAirport, newFlight.arrivalAirport, sDate, sTIme);
+    } else {
+        printFlights();
     }
 }
 
@@ -376,7 +419,7 @@ void departingFlightsFrom() {
         }
     }
     if(flag) {
-        printf("%s: no such airport ID\n", airportID);
+        printf("%s: no such airport ID\r\n", airportID);
         return;
     }
 
@@ -384,7 +427,7 @@ void departingFlightsFrom() {
         deFlights[i] = flights[airports[index].departedFlights[i]];
     }
 
-    sortAndPrintFlights(deFlights, airports[index].departedIterator);
+    sortAndPrintFlights(deFlights, airports[index].departedIterator, 0);
 }
 
 void arrivingFlightsTo() {
@@ -403,20 +446,20 @@ void arrivingFlightsTo() {
         }
     }
     if(flag) {
-        printf("%s: no such airport ID\n", airportID);
+        printf("%s: no such airport ID\r\n", airportID);
         return;
     }
 
-    for(i = 0; i < airports[index].departedIterator; i++) {
+    for(i = 0; i < airports[index].arrivedIterator; i++) {
         arFlights[i] = flights[airports[index].arrivedFlights[i]];
     }
 
-    sortAndPrintFlights(arFlights, airports[index].arrivedIterator);
+    sortAndPrintFlights(arFlights, airports[index].arrivedIterator, 1);
 }
 
 void advanceDate() {
     Date newDate;
-    char* sDate = (char *)malloc(11);
+    char sDate[DATE_SIZE];
 
     scanf("%d-%d-%d", &newDate.day, &newDate.month, &newDate.year);
     
@@ -424,12 +467,12 @@ void advanceDate() {
     
     /* invalid date check */
     if(invalidDateCheck(currentDate, newDate)) {
-        printf("invalid date\n");
+        printf("invalid date\r\n");
         return;
     } 
 
     currentDate = newDate;
-    printf("%s\n", sDate);
+    printf("%s\r\n", sDate);
 }
 
 int main() {
